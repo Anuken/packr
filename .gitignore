@@ -11,5 +11,4 @@ native/packr.vcxproj*
 .idea/
 *.iml
 *.class
-.gradle/
-build/
+
