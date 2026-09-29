@@ -95,7 +95,7 @@ val operatingSystemFamilyByPublicationName: MutableMap<String, OperatingSystemFa
  * MacOS x86 is no longer built because it requires and older version of Xcode and Apple makes it too difficult to install on newer versions of Mac
  * Windows x86 is no longer built because the Adopt OpenJDK has crash failures.
  */
-val targetPlatformsToBuild = listOf(machines.windows.x86_64, machines.linux.x86_64, machines.macOS.x86_64, machines.macOS.architecture("aarch64"))
+val targetPlatformsToBuild = listOf(machines.windows.x86_64, machines.linux.x86_64, machines.macOS.architecture("aarch64"))
 
 application {
    targetMachines.set(targetPlatformsToBuild)
