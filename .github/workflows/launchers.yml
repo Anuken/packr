@@ -6,7 +6,7 @@ jobs:
     runs-on: ubuntu-latest
     container: ubuntu:20.04          # old glibc (2.31)
     steps:
-      - run: apt-get update && apt-get install -y g++ binutils git
+      - run: apt-get update && apt-get install -y g++ binutils git unzip
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
