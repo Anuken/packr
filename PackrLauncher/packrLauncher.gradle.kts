@@ -35,7 +35,7 @@ plugins {
 }
 
 repositories {
-   jcenter()
+   mavenCentral()
    maven {
       url = uri("https://repo.gradle.org/gradle/libs-snapshots-local/")
    }
@@ -49,7 +49,7 @@ val javaHomePathString: String = Jvm.current().javaHome.absolutePath
 /**
  * Where to output executable files
  */
-val distributionDirectoryPath: Path = buildDir.toPath().resolve("distribute")
+val distributionDirectoryPath: Path = layout.buildDirectory.get().asFile.toPath().resolve("distribute")
 
 
 /**
@@ -332,7 +332,7 @@ unitTest {
 }
 
 tasks.withType(RunTestExecutable::class).configureEach {
-   workingDir = buildDir.toPath().resolve("cppTestDirectory").toFile()
+   workingDir = layout.buildDirectory.get().asFile.toPath().resolve("cppTestDirectory").toFile()
 }
 
 artifacts {

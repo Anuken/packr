@@ -18,6 +18,7 @@
 #include <packr.h>
 
 #include <dlfcn.h>
+#include <cstdint>
 #include <iostream>
 #include <limits.h>
 #include <stdio.h>
@@ -78,11 +79,13 @@ bool loadJNIFunctions(const dropt_char* jrePath, GetDefaultJavaVMInitArgs* getDe
 const dropt_char* getExecutablePath(const dropt_char* argv0) {
 
     static char buf[PATH_MAX];
-    uint32_t size = sizeof(buf);
+    // readlink() doesn't NUL-terminate, so leave room for the terminator
+    ssize_t length = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
 
-	if (readlink("/proc/self/exe", buf, size) == -1) {
+	if (length == -1) {
         return argv0;
 	}
+    buf[length] = '\0';
 
     return buf;
 }

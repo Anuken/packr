@@ -18,6 +18,7 @@ import com.google.common.hash.Hashing
 import com.google.common.io.BaseEncoding
 import org.apache.tools.ant.taskdefs.condition.Os
 import org.gradle.api.tasks.bundling.Compression.GZIP
+import org.gradle.process.ExecOperations
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.file.Files
@@ -60,6 +61,16 @@ buildscript {
       classpath("com.google.guava:guava:29.0-jre")
    }
 }
+
+/**
+ * Project.exec was removed in Gradle 9; ExecOperations is injected instead.
+ */
+interface InjectedExecOps {
+   @get:javax.inject.Inject
+   val execOps: ExecOperations
+}
+
+val injected: InjectedExecOps = objects.newInstance(InjectedExecOps::class.java)
 
 /**
  * A configuration containing jlink processed JREs for the current platform and JDKs for other platforms
@@ -207,13 +218,13 @@ data class JvmRemoteArchiveInformation(
 /**
  * The directory where JDKs processed with jlink are stored.
  */
-val jlinkProcessedJdkOutputDirectoryPath: Path = buildDir.toPath().resolve("processedJdks")
+val jlinkProcessedJdkOutputDirectoryPath: Path = layout.buildDirectory.get().asFile.toPath().resolve("processedJdks")
 
 /**
  * Parses the filename to determine the Java version of the JDK.
  */
 fun getJvmVersion(jdkFilename: String): JavaVersion {
-   val jdkFilenameLowercase = jdkFilename.toLowerCase()
+   val jdkFilenameLowercase = jdkFilename.lowercase()
    return when {
       jdkFilenameLowercase.contains("openjdk8u") -> {
          JavaVersion.VERSION_1_8
@@ -236,7 +247,7 @@ fun getJvmVersion(jdkFilename: String): JavaVersion {
  * @see [Os]
  */
 fun getJdkOsFamily(jdkFilename: String): String {
-   val jdkFilenameLowercase = jdkFilename.toLowerCase()
+   val jdkFilenameLowercase = jdkFilename.lowercase()
    return when {
       jdkFilenameLowercase.contains("linux") -> {
          Os.FAMILY_UNIX
@@ -252,7 +263,7 @@ fun getJdkOsFamily(jdkFilename: String): String {
 }
 
 fun getJdkOsArch(jdkFilename: String): String {
-   val jdkFilenameLowercase = jdkFilename.toLowerCase()
+   val jdkFilenameLowercase = jdkFilename.lowercase()
    return when {
       jdkFilenameLowercase.contains("x64") -> {
          "x86-64"
@@ -317,7 +328,7 @@ jvmRemoteArchiveInformationList.forEach { (jvmArchiveUrl, jvmArchiveSha256) ->
          if (Files.exists(jvmDownloadLocation)) {
             logger.info("jvmDownloadLocation $jvmDownloadLocation already exists, checking SHA 256")
             val downloadArchiveSha256Hex = getFileSha256HexEncoded(jvmDownloadLocation)
-            if (jvmArchiveSha256.toLowerCase() == downloadArchiveSha256Hex.toLowerCase()) {
+            if (jvmArchiveSha256.lowercase() == downloadArchiveSha256Hex.lowercase()) {
                logger.info("SHA256 for $jvmDownloadLocation matches")
             } else {
                logger.info("SHA256 for $jvmDownloadLocation of $downloadArchiveSha256Hex does not match source $jvmArchiveSha256")
@@ -340,7 +351,7 @@ val extractJdkTasks = mutableListOf<TaskProvider<Copy>>()
 /**
  * Directory to extract all current platform JDKs into
  */
-val jdksExtractionPath: Path = buildDir.toPath().resolve("jdks-extracted")
+val jdksExtractionPath: Path = layout.buildDirectory.get().asFile.toPath().resolve("jdks-extracted")
 downloadJvmTasks.forEach { downloadTaskProvider ->
    val jvmArchiveFilePath = downloadTaskProvider.get().outputs.files.singleFile.toPath()
 
@@ -359,9 +370,9 @@ downloadJvmTasks.forEach { downloadTaskProvider ->
       return@forEach
    }
 
-   val extractTask = tasks.register<Copy>("extract${downloadTaskProvider.name.capitalize()}") {
+   val extractTask = tasks.register<Copy>("extract${downloadTaskProvider.name.replaceFirstChar { it.uppercase() }}") {
       dependsOn(downloadTaskProvider)
-      if (jvmArchiveFilePath.fileName.toString().toLowerCase().contains(".tar")) {
+      if (jvmArchiveFilePath.fileName.toString().lowercase().contains(".tar")) {
          from(tarTree(jvmArchiveFilePath.toFile()))
       } else {
          from(zipTree(jvmArchiveFilePath.toFile()))
@@ -385,14 +396,14 @@ fun findJlinkExecutable(jdkToJlinkDirectory: Path): Path? {
 /**
  * Directory where all JREs are saved that were created using jlink.
  */
-val jlinkOutputDirectoryPath: Path = buildDir.toPath().resolve("jlink-output")
+val jlinkOutputDirectoryPath: Path = layout.buildDirectory.get().asFile.toPath().resolve("jlink-output")
 
 /**
  * List of all tasks that will execute jlink creating a JRE for the current platform.
  */
 val jlinkTasks = mutableListOf<TaskProvider<Task>>()
 extractJdkTasks.forEach { extractJdkTask ->
-   val jlinkJdkTask = tasks.register("jlink${extractJdkTask.name.capitalize()}") {
+   val jlinkJdkTask = tasks.register("jlink${extractJdkTask.name.replaceFirstChar { it.uppercase() }}") {
       dependsOn(extractJdkTask)
 
       inputs.dir(extractJdkTask.get().destinationDir)
@@ -413,7 +424,7 @@ extractJdkTasks.forEach { extractJdkTask ->
          val jlinkExecutablePath: Path = findJlinkExecutable(extractJdkTask.get().destinationDir.toPath())
             ?: throw GradleException("Couldn't find a suitable jlink for JDK ${extractJdkTask.get().destinationDir}")
 
-         exec {
+         injected.execOps.exec {
             executable = jlinkExecutablePath.toAbsolutePath().toString()
             args("--module-path")
             args(jdkPath.resolve("jmods").toAbsolutePath().toString())
@@ -432,13 +443,13 @@ extractJdkTasks.forEach { extractJdkTask ->
 /**
  * Directory to store the tar files of all the jlink processed JREs for the current platform.
  */
-val jlinkTarOutputDirectoryPath: Path = buildDir.toPath().resolve("jlink-tar-output")
+val jlinkTarOutputDirectoryPath: Path = layout.buildDirectory.get().asFile.toPath().resolve("jlink-tar-output")
 
 /*
  * Tar up every jlink created JRE.
  */
 jlinkTasks.forEach { jlinkTask ->
-   val tarJlinkJreTask = tasks.register<Tar>("tar${jlinkTask.name.capitalize()}") {
+   val tarJlinkJreTask = tasks.register<Tar>("tar${jlinkTask.name.replaceFirstChar { it.uppercase() }}") {
       dependsOn(jlinkTask)
 
       compression = GZIP
@@ -483,7 +494,7 @@ fun downloadHttpUrlToFile(url: URL, file: Path) {
 fun downloadAndVerifySha256(url: URL, file: Path, fileSha256Hex: String) {
    downloadHttpUrlToFile(url, file)
    val downloadedSha256Hex = getFileSha256HexEncoded(file)
-   if (fileSha256Hex.toLowerCase() != downloadedSha256Hex.toLowerCase()) {
+   if (fileSha256Hex.lowercase() != downloadedSha256Hex.lowercase()) {
       throw GradleException("Downloaded $url but its SHA 256 is invalid")
    }
 }

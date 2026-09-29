@@ -1,0 +1,39 @@
+name: Launchers
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    container: ubuntu:20.04          # old glibc (2.31)
+    steps:
+      - run: apt-get update && apt-get install -y g++ binutils git
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - run: ./gradlew --no-daemon :PackrLauncher:currentOsExecutableZip
+      - name: Show max glibc required
+        run: |
+          unzip -o PackrLauncher/build/distributions/*.zip -d /tmp/l
+          objdump -T /tmp/l/packrLauncher-linux-x86-64 | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
+      - uses: actions/upload-artifact@v4
+        with: { name: launcher-linux, path: PackrLauncher/build/distributions/*.zip }
+
+  macos:
+    runs-on: macos-14                # Apple Silicon runner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - run: ./gradlew --no-daemon :PackrLauncher:currentOsExecutableZip
+      - uses: actions/upload-artifact@v4
+        with: { name: launcher-macos, path: PackrLauncher/build/distributions/*.zip }
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - run: .\gradlew.bat --no-daemon :PackrLauncher:currentOsExecutableZip
+      - uses: actions/upload-artifact@v4
+        with: { name: launcher-windows, path: PackrLauncher/build/distributions/*.zip }

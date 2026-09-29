@@ -21,6 +21,7 @@ import org.apache.tools.ant.taskdefs.condition.Os.FAMILY_UNIX
 import org.apache.tools.ant.taskdefs.condition.Os.FAMILY_WINDOWS
 import org.apache.tools.ant.taskdefs.condition.Os.isFamily
 import org.gradle.internal.jvm.Jvm
+import org.gradle.process.ExecOperations
 import java.io.ByteArrayOutputStream
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
@@ -40,7 +41,6 @@ plugins {
 
 repositories {
    mavenCentral()
-   jcenter()
    maven {
       url = uri("https://oss.sonatype.org/content/repositories/snapshots/")
    }
@@ -73,6 +73,16 @@ java {
    sourceCompatibility = JavaVersion.VERSION_1_8
    targetCompatibility = JavaVersion.VERSION_1_8
 }
+
+/**
+ * Project.exec was removed in Gradle 9; ExecOperations is injected instead.
+ */
+interface InjectedExecOps {
+   @get:javax.inject.Inject
+   val execOps: ExecOperations
+}
+
+val injected: InjectedExecOps = objects.newInstance(InjectedExecOps::class.java)
 
 /**
  * Configuration for consuming all the artifacts produced by TestAppJreDist
@@ -124,7 +134,7 @@ val createTestDirectory: TaskProvider<Task> = tasks.register("createTestDirector
    dependsOn(packrAllArchive)
    dependsOn(jdksAndJresFromJreDist)
 
-   val outputDirectoryPath = buildDir.toPath().resolve("testApp")
+   val outputDirectoryPath = layout.buildDirectory.get().asFile.toPath().resolve("testApp")
    outputs.dir(outputDirectoryPath.toFile())
 
    inputs.files(configurations[JavaPlugin.RUNTIME_CLASSPATH_CONFIGURATION_NAME])
@@ -142,7 +152,7 @@ val createTestDirectory: TaskProvider<Task> = tasks.register("createTestDirector
       jdksAndJresFromJreDist.get().resolve().parallelStream().forEach {
          val path = it.toPath()
          if (Files.isSameFile(jdkArchiveDirectory, path)) return@forEach
-         val pathnameLowerCase = path.fileName.toString().toLowerCase()
+         val pathnameLowerCase = path.fileName.toString().lowercase()
          if (!(pathnameLowerCase.endsWith(".zip") || pathnameLowerCase.endsWith(".gz")) || !pathnameLowerCase.contains("jdk")) {
             logger.info("Skipping path=$path in jdksAndJresFromJreDist")
             return@forEach
@@ -166,7 +176,7 @@ val createTestDirectory: TaskProvider<Task> = tasks.register("createTestDirector
             Files.walkFileTree(packrOutputDirectory, object : SimpleFileVisitor<Path>() {
                override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
                   if (file.fileName.toString() == "java") {
-                     exec {
+                     injected.execOps.exec {
                         executable = "chmod"
                         args("+x")
                         args(file.toAbsolutePath().toString())
@@ -182,7 +192,7 @@ val createTestDirectory: TaskProvider<Task> = tasks.register("createTestDirector
             logger.info("Executing packr in ${packrOutputDirectory.toAbsolutePath()}")
             val standardOutputCapture = ByteArrayOutputStream()
             val errorOutputCapture = ByteArrayOutputStream()
-            val execResult = exec {
+            val execResult = injected.execOps.exec {
                workingDir = packrOutputDirectory.toFile()
                environment("PATH", "")
                environment("LD_LIBRARY_PATH", "")
@@ -219,7 +229,7 @@ val createTestDirectory: TaskProvider<Task> = tasks.register("createTestDirector
             if (!outputAsString.contains("Testing uncaught exception handler.")) {
                throw GradleException("Packr bundle in $packrOutputDirectory didn't throw \"Testing uncaught exception handler.\"")
             }
-            if (fileNameNoExtension.toLowerCase()
+            if (fileNameNoExtension.lowercase()
                    .contains("jdk14") && !outputAsString.contains("Using The Z Garbage Collector")) {
                throw GradleException("Packr bundle in $packrOutputDirectory didn't execute using the Z garbage collector")
             }
@@ -263,7 +273,7 @@ val javaHomePath: String = Jvm.current().javaHome.absolutePath
  */
 fun createPackrContent(jdkPath: Path, osFamily: String, destination: Path) {
    delete(destination.toFile())
-   exec {
+   injected.execOps.exec {
       executable = "$javaHomePath/bin/java"
 
       args("-jar")
@@ -316,7 +326,7 @@ fun createPackrContent(jdkPath: Path, osFamily: String, destination: Path) {
       args("Djava.awt.headless=true")
       args("--vmargs")
       args("XstartOnFirstThread")
-      if (jdkPath.fileName.toString().toLowerCase().contains("jdk14")) {
+      if (jdkPath.fileName.toString().lowercase().contains("jdk14")) {
          args("--useZgcIfSupportedOs")
          args("--vmargs")
          args("Xlog:gc")

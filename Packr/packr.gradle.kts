@@ -28,7 +28,7 @@ version = rootProject.version
 plugins {
    `maven-publish`
    application
-   id("com.github.johnrengelman.shadow") version "5.2.0"
+   id("com.gradleup.shadow") version "9.2.2"
    signing
 }
 
@@ -51,7 +51,6 @@ repositories {
 
    mavenCentral()
    maven(uri("https://oss.sonatype.org/content/repositories/snapshots/"))
-   jcenter()
    gitHubRepositoryForPackr(project)
 
    // temporary for CI publishing until oss.sonatype.org is available for com.libgdx.packr or com.badlogicgames.packr
@@ -60,8 +59,15 @@ repositories {
 }
 
 java {
-   sourceCompatibility = JavaVersion.VERSION_1_8
-   targetCompatibility = JavaVersion.VERSION_1_8
+   sourceCompatibility = JavaVersion.VERSION_17
+   targetCompatibility = JavaVersion.VERSION_17
+}
+
+tasks.withType<JavaCompile>().configureEach {
+   options.release.set(17)
+}
+tasks.withType<Javadoc>().configureEach {
+   (options as StandardJavadocDocletOptions).addStringOption("Xdoclint:none", "-quiet")
 }
 
 /**
@@ -77,15 +83,17 @@ val packrLauncherExecutablesForCurrentOs: NamedDomainObjectProvider<Configuratio
       configurations.register("currentOsPackrLauncherExecutables")
 dependencies {
    //
-   implementation("org.apache.commons:commons-compress:1.20")
+   implementation("org.apache.commons:commons-compress:1.27.1")
    implementation("com.lexicalscope.jewelcli:jewelcli:0.8.9")
    implementation("com.eclipsesource.minimal-json:minimal-json:0.9.1")
 
    // test
-   testImplementation("org.junit.jupiter:junit-jupiter:5.6.2")
+   testImplementation(platform("org.junit:junit-bom:5.11.4"))
+   testImplementation("org.junit.jupiter:junit-jupiter")
+   testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
    // logging
-   val log4jVersion = "2.13.1"
+   val log4jVersion = "2.24.3"
    implementation("org.slf4j:slf4j-api:1.7.30")
    runtimeOnly("org.apache.logging.log4j:log4j-slf4j-impl:$log4jVersion")
    runtimeOnly("org.apache.logging.log4j:log4j-core:$log4jVersion")
@@ -110,7 +118,7 @@ dependencies {
 }
 
 application {
-   mainClassName = "com.badlogicgames.packr.Packr"
+   mainClass.set("com.badlogicgames.packr.Packr")
 }
 
 java {
@@ -122,10 +130,16 @@ java {
  * Sync the Packr launcher dependencies to the build directory for including into the Jar
  */
 val syncPackrLaunchers: TaskProvider<Sync> = tasks.register<Sync>("syncPackrLaunchers") {
-   dependsOn(packrLauncherMavenRepositoryExecutables)
+   // Lenient: launchers that can't be downloaded (repository down, snapshot never published, ...) are skipped
+   // instead of failing the build. The launcher built locally by :PackrLauncher is still included, so the jar
+   // only supports the platforms whose launchers were found.
+   val downloadedLaunchers = packrLauncherMavenRepositoryExecutables.get().incoming.artifactView {
+      isLenient = true
+   }.files
+   dependsOn(downloadedLaunchers)
 
-   from(packrLauncherMavenRepositoryExecutables)
-   into(File(buildDir, "packrLauncherMavenRepository"))
+   from(downloadedLaunchers)
+   into(layout.buildDirectory.dir("packrLauncherMavenRepository").get().asFile)
    rename { existingFilename ->
       when {
          existingFilename.contains("linux") && existingFilename.contains("x86-64") -> {
@@ -157,7 +171,7 @@ val syncCurrentOsPackrLaunchers: TaskProvider<Sync> = tasks.register<Sync>("sync
    dependsOn(packrLauncherExecutablesForCurrentOs)
 
    from(zipTree(packrLauncherExecutablesForCurrentOs.get().singleFile))
-   into(File(buildDir, "packrLauncherCurrentOS"))
+   into(layout.buildDirectory.dir("packrLauncherCurrentOS").get().asFile)
    rename { existingFilename ->
       when {
          existingFilename.contains("linux") && existingFilename.contains("x86-64") -> {
@@ -185,7 +199,7 @@ val syncCurrentOsPackrLaunchers: TaskProvider<Sync> = tasks.register<Sync>("sync
 /**
  * Directory with the latest packr launcher executables
  */
-val packrLauncherDirectory: Path = buildDir.toPath().resolve("packrLauncher")
+val packrLauncherDirectory: Path = layout.buildDirectory.get().asFile.toPath().resolve("packrLauncher")
 
 /**
  * Creates a consolidated directory containing the latest locally built executables and filling in any missing ones with those downloaded from the Maven repository
@@ -194,15 +208,17 @@ val createPackrLauncherConsolidatedDirectory: TaskProvider<Task> = tasks.registe
    dependsOn(syncCurrentOsPackrLaunchers)
    dependsOn(syncPackrLaunchers)
 
-   inputs.dir(syncCurrentOsPackrLaunchers.get().destinationDir)
-   inputs.dir(syncPackrLaunchers.get().destinationDir)
+   // inputs.files (not inputs.dir): a Sync task with nothing to copy (e.g. no launchers could be downloaded)
+   // never creates its directory, and inputs.dir fails validation when the directory is missing.
+   inputs.files(syncCurrentOsPackrLaunchers.get().destinationDir)
+   inputs.files(syncPackrLaunchers.get().destinationDir)
    outputs.dir(packrLauncherDirectory.toFile())
 
    doLast {
       Files.createDirectories(packrLauncherDirectory)
 
       // Executables from Maven repository
-      Files.walk(syncPackrLaunchers.get().destinationDir.toPath()).use { pathStream ->
+      if (Files.isDirectory(syncPackrLaunchers.get().destinationDir.toPath())) Files.walk(syncPackrLaunchers.get().destinationDir.toPath()).use { pathStream ->
          pathStream.forEach {
             if (Files.isSameFile(syncPackrLaunchers.get().destinationDir.toPath(), it)) return@forEach
             Files.copy(it, packrLauncherDirectory.resolve(it.fileName), StandardCopyOption.REPLACE_EXISTING)
@@ -210,7 +226,7 @@ val createPackrLauncherConsolidatedDirectory: TaskProvider<Task> = tasks.registe
       }
 
       // Executables built by PackrLauncher project on the current system
-      Files.walk(syncCurrentOsPackrLaunchers.get().destinationDir.toPath()).use { pathStream ->
+      if (Files.isDirectory(syncCurrentOsPackrLaunchers.get().destinationDir.toPath())) Files.walk(syncCurrentOsPackrLaunchers.get().destinationDir.toPath()).use { pathStream ->
          pathStream.forEach {
             if (Files.isSameFile(syncCurrentOsPackrLaunchers.get().destinationDir.toPath(), it)) return@forEach
             Files.copy(it, packrLauncherDirectory.resolve(it.fileName), StandardCopyOption.REPLACE_EXISTING)
@@ -223,7 +239,7 @@ tasks.named<Jar>(JavaPlugin.JAR_TASK_NAME) {
    dependsOn(createPackrLauncherConsolidatedDirectory)
 
    @Suppress("UnstableApiUsage") manifest {
-      attributes["Main-Class"] = application.mainClassName
+      attributes["Main-Class"] = application.mainClass.get()
    }
 
    from(packrLauncherDirectory.toFile())
@@ -237,8 +253,14 @@ tasks.withType(ShadowJar::class).configureEach {
    dependsOn(createPackrLauncherConsolidatedDirectory)
 
    @Suppress("UnstableApiUsage") manifest {
-      attributes["Main-Class"] = application.mainClassName
+      attributes["Main-Class"] = application.mainClass.get()
+      // log4j-core is a multi-release jar (Java 9+ classes under META-INF/versions); keep that working after shadowing
+      attributes["Multi-Release"] = "true"
    }
+
+   // Merge META-INF/services and log4j's plugin cache so logging works from the fat jar
+   mergeServiceFiles()
+   transform(com.github.jengelman.gradle.plugins.shadow.transformers.Log4j2PluginsCacheFileTransformer::class.java)
 
    from(packrLauncherDirectory.toFile())
 }
@@ -292,7 +314,7 @@ publishing {
          artifact(tasks.named("sourcesJar").get())
 
          groupId = project.group as String
-         artifactId = project.name.toLowerCase() + "-all"
+         artifactId = project.name.lowercase() + "-all"
          version = project.version as String
          pom {
             name.set("Packr shadow jar")
@@ -320,7 +342,7 @@ publishing {
       }
       register<MavenPublication>(project.name) {
          from(components["java"])
-         artifactId = project.name.toLowerCase()
+         artifactId = project.name.lowercase()
          pom {
             name.set("Packr")
             description.set("A jar with Maven dependencies for use as part of an application or build script. This can be useful for creating Packr configuration JSON files. Packages your JAR, assets and a JVM for distribution on Windows, Linux and macOS, adding a native executable file to make it appear like a native app.")
