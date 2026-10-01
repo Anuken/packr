@@ -82,7 +82,6 @@ val packrLauncherMavenRepositoryExecutables: NamedDomainObjectProvider<Configura
 val packrLauncherExecutablesForCurrentOs: NamedDomainObjectProvider<Configuration> =
       configurations.register("currentOsPackrLauncherExecutables")
 dependencies {
-   //
    implementation("org.apache.commons:commons-compress:1.27.1")
    implementation("com.lexicalscope.jewelcli:jewelcli:0.8.9")
    implementation("com.eclipsesource.minimal-json:minimal-json:0.9.1")
@@ -97,24 +96,6 @@ dependencies {
    implementation("org.slf4j:slf4j-api:1.7.30")
    runtimeOnly("org.apache.logging.log4j:log4j-slf4j-impl:$log4jVersion")
    runtimeOnly("org.apache.logging.log4j:log4j-core:$log4jVersion")
-
-   // Packr launcher executables
-   add(packrLauncherMavenRepositoryExecutables.name, "com.badlogicgames.packr:packrLauncher-linux-x86-64:$version") {
-      // Gradle won't download extension free files without this
-      artifact {
-         this.name = "packrLauncher-linux-x86-64"
-         this.type = ""
-      }
-   }
-   add(packrLauncherMavenRepositoryExecutables.name, "com.badlogicgames.packr:packrLauncher-macos:$version") {
-      // Gradle won't download extension free files without this
-      artifact {
-         this.name = "packrLauncher-macos"
-         this.type = ""
-      }
-   }
-   add(packrLauncherMavenRepositoryExecutables.name, "com.badlogicgames.packr:packrLauncher-windows-x86-64:$version")
-   add(packrLauncherExecutablesForCurrentOs.name, project(":PackrLauncher", "currentOsExecutables"))
 }
 
 application {
@@ -127,110 +108,16 @@ java {
 }
 
 /**
- * Sync the Packr launcher dependencies to the build directory for including into the Jar
- */
-val syncPackrLaunchers: TaskProvider<Sync> = tasks.register<Sync>("syncPackrLaunchers") {
-   // Lenient: launchers that can't be downloaded (repository down, snapshot never published, ...) are skipped
-   // instead of failing the build. The launcher built locally by :PackrLauncher is still included, so the jar
-   // only supports the platforms whose launchers were found.
-   val downloadedLaunchers = packrLauncherMavenRepositoryExecutables.get().incoming.artifactView {
-      isLenient = true
-   }.files
-   dependsOn(downloadedLaunchers)
-
-   from(downloadedLaunchers)
-   into(layout.buildDirectory.dir("packrLauncherMavenRepository").get().asFile)
-   rename { existingFilename ->
-      when {
-         existingFilename.contains("linux") && existingFilename.contains("x86-64") -> {
-            "packr-linux-x64"
-         }
-         existingFilename.contains("linux") && existingFilename.contains("x86") -> {
-            "packr-linux"
-         }
-         existingFilename.contains("mac") -> {
-            "packr-mac"
-         }
-         existingFilename.contains("windows") && existingFilename.contains("x86-64") -> {
-            "packr-windows-x64.exe"
-         }
-         existingFilename.contains("windows") && existingFilename.contains("x86") -> {
-            "packr-windows.exe"
-         }
-         else -> {
-            existingFilename
-         }
-      }
-   }
-}
-
-/**
- * Sync the latest built binaries from the PackrLauncher project
- */
-val syncCurrentOsPackrLaunchers: TaskProvider<Sync> = tasks.register<Sync>("syncCurrentOsPackrLaunchers") {
-   dependsOn(packrLauncherExecutablesForCurrentOs)
-
-   from(zipTree(packrLauncherExecutablesForCurrentOs.get().singleFile))
-   into(layout.buildDirectory.dir("packrLauncherCurrentOS").get().asFile)
-   rename { existingFilename ->
-      when {
-         existingFilename.contains("linux") && existingFilename.contains("x86-64") -> {
-            "packr-linux-x64"
-         }
-         existingFilename.contains("linux") && existingFilename.contains("x86") -> {
-            "packr-linux"
-         }
-         existingFilename.contains("mac") -> {
-            "packr-mac"
-         }
-         existingFilename.contains("windows") && existingFilename.contains("x86-64") -> {
-            "packr-windows-x64.exe"
-         }
-         existingFilename.contains("windows") && existingFilename.contains("x86") -> {
-            "packr-windows.exe"
-         }
-         else -> {
-            existingFilename
-         }
-      }
-   }
-}
-
-/**
  * Directory with the latest packr launcher executables
  */
 val packrLauncherDirectory: Path = layout.buildDirectory.get().asFile.toPath().resolve("packrLauncher")
 
-/**
- * Creates a consolidated directory containing the latest locally built executables and filling in any missing ones with those downloaded from the Maven repository
- */
-val createPackrLauncherConsolidatedDirectory: TaskProvider<Task> = tasks.register("createPackrLauncherConsolidatedDirectory") {
-   dependsOn(syncCurrentOsPackrLaunchers)
-   dependsOn(syncPackrLaunchers)
-
-   // inputs.files (not inputs.dir): a Sync task with nothing to copy (e.g. no launchers could be downloaded)
-   // never creates its directory, and inputs.dir fails validation when the directory is missing.
-   inputs.files(syncCurrentOsPackrLaunchers.get().destinationDir)
-   inputs.files(syncPackrLaunchers.get().destinationDir)
-   outputs.dir(packrLauncherDirectory.toFile())
-
-   doLast {
-      Files.createDirectories(packrLauncherDirectory)
-
-      // Executables from Maven repository
-      if (Files.isDirectory(syncPackrLaunchers.get().destinationDir.toPath())) Files.walk(syncPackrLaunchers.get().destinationDir.toPath()).use { pathStream ->
-         pathStream.forEach {
-            if (Files.isSameFile(syncPackrLaunchers.get().destinationDir.toPath(), it)) return@forEach
-            Files.copy(it, packrLauncherDirectory.resolve(it.fileName), StandardCopyOption.REPLACE_EXISTING)
-         }
-      }
-
-      // Executables built by PackrLauncher project on the current system
-      if (Files.isDirectory(syncCurrentOsPackrLaunchers.get().destinationDir.toPath())) Files.walk(syncCurrentOsPackrLaunchers.get().destinationDir.toPath()).use { pathStream ->
-         pathStream.forEach {
-            if (Files.isSameFile(syncCurrentOsPackrLaunchers.get().destinationDir.toPath(), it)) return@forEach
-            Files.copy(it, packrLauncherDirectory.resolve(it.fileName), StandardCopyOption.REPLACE_EXISTING)
-         }
+val createPackrLauncherConsolidatedDirectory = tasks.register<Sync>("createPackrLauncherConsolidatedDirectory") {
+   from(layout.projectDirectory.dir("launchers"))
+   into(packrLauncherDirectory.toFile())
+   doFirst {
+      listOf("packr-linux-x64", "packr-mac", "packr-windows-x64.exe").forEach {
+         require(file("launchers/$it").exists()) { "Missing launcher: Packr/launchers/$it" }
       }
    }
 }

@@ -28,12 +28,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
-import java.util.HashSet;
-import java.util.Set;
+import java.nio.file.*;
+import java.util.*;
 import java.util.function.Predicate;
+import java.util.stream.*;
 
 import static com.badlogicgames.packr.ArchiveUtils.ArchiveType.ZIP;
 
@@ -281,39 +279,45 @@ class PackrReduce {
 		  System.out.println("Removing foreign platform libs ...");
 
 		  Set<String> extensions = new HashSet<>();
+		  Set<String> folders = new HashSet<>();
 		  String libExtension;
 
-		  switch (config.platform) {
-		  case Windows64:
-				extensions.add(".dylib");
-				extensions.add(".dylib.git");
-				extensions.add(".dylib.sha1");
-				extensions.add(".so");
-				extensions.add(".so.git");
-				extensions.add(".so.sha1");
-				libExtension = ".dll";
-				break;
-		  case Linux64:
-				extensions.add(".dll");
-				extensions.add(".dll.git");
-				extensions.add(".dll.sha1");
-				extensions.add(".dylib");
-				extensions.add(".dylib.git");
-				extensions.add(".dylib.sha1");
-				libExtension = ".so";
-				break;
-		  case MacOS:
-				extensions.add(".dll");
-				extensions.add(".dll.git");
-				extensions.add(".dll.sha1");
-				extensions.add(".so");
-				extensions.add(".so.git");
-				extensions.add(".so.sha1");
-				libExtension = ".dylib";
-				break;
-		  default:
-				throw new IllegalStateException();
-		  }
+         switch(config.platform){
+             case Windows64 -> {
+                 extensions.add(".dylib");
+                 extensions.add(".dylib.git");
+                 extensions.add(".dylib.sha1");
+                 extensions.add(".so");
+                 extensions.add(".so.git");
+                 extensions.add(".so.sha1");
+                 folders.add("macos");
+                 folders.add("linux");
+                 libExtension = ".dll";
+             }
+             case Linux64 -> {
+                 extensions.add(".dll");
+                 extensions.add(".dll.git");
+                 extensions.add(".dll.sha1");
+                 extensions.add(".dylib");
+                 extensions.add(".dylib.git");
+                 extensions.add(".dylib.sha1");
+                 folders.add("macos");
+                 folders.add("windows");
+                 libExtension = ".so";
+             }
+             case MacOS -> {
+                 extensions.add(".dll");
+                 extensions.add(".dll.git");
+                 extensions.add(".dll.sha1");
+                 extensions.add(".so");
+                 extensions.add(".so.git");
+                 extensions.add(".so.sha1");
+                 folders.add("linux");
+                 folders.add("windows");
+                 libExtension = ".dylib";
+             }
+             default -> throw new IllegalStateException();
+         }
 
 		  // let's remove any shared libs not used on the platform, e.g. libGDX/LWJGL natives
 		  for (String classpath : config.removePlatformLibs) {
@@ -356,6 +360,15 @@ class PackrReduce {
 										  break;
 									 }
 								}
+                                if(file.isDirectory() && folders.contains(file.getName())){
+                                    if (config.verbose) {
+                                        System.out.println("  # Removing '" + file.getPath() + "'");
+                                    }
+                                    try (Stream<Path> paths = Files.walk(file.toPath())) {
+                                        paths.sorted(Comparator.reverseOrder()).map(Path::toFile).forEach(File::delete);
+                                    }
+                                    removed = true;
+                                }
 						  }
 						  if (!removed && extractLibs) {
 								if (file.getName().endsWith(libExtension)) {
